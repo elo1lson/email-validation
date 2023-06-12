@@ -5,31 +5,17 @@ import validator from "email-validator";
 import crypto from "crypto-js";
 import { transporter } from "../config/nodemailer.js";
 import tempUser from "../models/TempUser.js";
+import User from "../models/User.js";
 
 const router = Router();
 
-router.get("/create", async (req, res) =>
+router.get("/create", async (_, res) =>
 	res.sendFile(pageName("createAccount")),
 );
-router.get("/validate/:id", async (req, res) => {
-	const id = req.params.id;
-	const validateUser = await tempUser.findOne({ _id: id });
-	res.sendFile(pageName("validateCode"));
-});
-
-router.post("/validate/:id", async (req, res) => {
-	const id = req.params.id;
-	const validateUser = await tempUser.findOne({ _id: id });
-	const verificationCode = req.body.verificationCode;
-	if (!validateUser) return res.sendFile(pageName("validationNotFound"));
-	if (validateUser.code == verificationCode) {
-		return res.sendFile(pageName("validatedCode"));
-	}
-	return res.sendFile(pageName("invalidCode"));
-});
 
 router.post("/create", async (req, res) => {
 	if (!validator.validate(req.body.email)) return;
+
 	const { email, nome, sobrenome } = req.body;
 	const code = Math.floor(Math.random() * 10000)
 		.toString()
@@ -53,9 +39,6 @@ router.post("/create", async (req, res) => {
 			console.log(e);
 		});
 
-	const data = encodeURIComponent(email + nome + sobrenome);
-	const hash = crypto.SHA256(data).toString();
-
 	const url = "http://192.168.1.61:3000/account/validate/" + newTempUser._id;
 	let mailOptions = {
 		from: "eloilson2@outlook.com",
@@ -64,13 +47,58 @@ router.post("/create", async (req, res) => {
 		html: makeEmail({ code, name: req.body.nome, url }),
 	};
 
-	transporter.sendMail(mailOptions, (error, info) => {
+	transporter.sendMail(mailOptions, (error, _) => {
 		if (error) {
 			console.log("Erro ao enviar o e-mail:", error);
 		} else {
 			res.sendFile(pageName("sendedMail"));
 		}
 	});
+});
+
+router.get("/validate/:id", async (req, res) => {
+	const id = req.params.id;
+	const validateUser = await tempUser
+		.findOne({ _id: id })
+		.then((u) => u)
+		.catch((e) => {
+			console.log(e, "erro");
+			return res.sendFile(pageName("validationNotFound"));
+		});
+	if (validateUser) res.sendFile(pageName("validateCode"));
+});
+
+router.post("/validate/:id", async (req, res) => {
+	const validate = async () => {
+		const password = req.body.password;
+
+		tempUser.findOne({ _id: id }).then(async (doc) => {
+			const { email, name, lastName } = doc;
+			const passwordHash = crypto
+				.SHA256(password + process.env.SALT)
+				.toString();
+
+			User.create({ email, name, lastName, password: passwordHash }).then(
+				(u) => {
+					u.save();
+					tempUser.findOneAndDelete({ _id: id }).then((d) => d);
+				},
+			);
+		});
+	};
+
+	const id = req.params.id;
+	const validateUser = await tempUser.findOne({ _id: id });
+	const verificationCode = req.body.verificationCode;
+
+	if (!validateUser) return res.sendFile(pageName("validationNotFound"));
+
+	if (validateUser.code == verificationCode) {
+		validate();
+		return res.sendFile(pageName("validatedCode"));
+	}
+
+	return res.sendFile(pageName("invalidCode"));
 });
 
 export default router;
